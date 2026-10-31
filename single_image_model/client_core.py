@@ -29,7 +29,6 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import cv2
 import numpy as np
 import zmq
-import zmq.asyncio
 
 try:
     import websockets
@@ -409,8 +408,8 @@ class SyntheticCamera:
 # ClientCore (Multi-Threaded LifoQueue Capture + ZeroMQ Network Transporter)
 # ==============================================================================
 class ClientCore:
-    """Ultra-low-latency multi-threaded video transporter using a lock-free single-slot
-    `LifoQueue(maxsize=1)` between Thread A (Capture) and Thread B (ZMQ Network Transporter).
+    """Multi-threaded video transport using a synchronized single-slot
+    `LifoQueue(maxsize=1)` between capture and network workers.
     """
 
     def __init__(
@@ -459,24 +458,23 @@ class ClientCore:
 
         self.cap: Any = None
         self.camera_idx: Any = None
-        self.ctx: Optional[zmq.asyncio.Context] = None
-        self.socket: Optional[zmq.asyncio.Socket] = None
+        self.ctx: Optional[zmq.Context] = None
+        self.socket: Optional[zmq.Socket] = None
 
         self._send_times: collections.deque = collections.deque(maxlen=100)
-        self.loopback_ctx: Optional[zmq.asyncio.Context] = None
-        self.loopback_server_sock: Optional[zmq.asyncio.Socket] = None
-        self.loopback_task: Optional[asyncio.Task] = None
-
-        # Eagerly initialize socket for API compatibility
-        self.init_socket()
+        self.loopback_ctx: Optional[zmq.Context] = None
+        self.loopback_server_sock: Optional[zmq.Socket] = None
+        self._loopback_thread: Optional[threading.Thread] = None
 
     @property
-    def sock(self) -> Optional[zmq.asyncio.Socket]:
+    def sock(self) -> Optional[zmq.Socket]:
         return self.socket
 
-    def init_socket(self) -> zmq.asyncio.Socket:
-        """Initializes zmq.asyncio.Context and configures zmq.DEALER with zmq.CONFLATE=1,
-        zmq.LINGER=0, timeouts, and connects to server_url.
+    def init_socket(self) -> zmq.Socket:
+        """Create a synchronous compatibility DEALER socket for external callers.
+
+        The command-line transport worker owns its own socket and context so setup and
+        cleanup happen in the same thread on macOS, Linux, and Windows.
         """
         if self.socket is not None and not self.socket.closed:
             try:
@@ -485,7 +483,7 @@ class ClientCore:
                 pass
 
         if self.ctx is None:
-            self.ctx = zmq.asyncio.Context()
+            self.ctx = zmq.Context()
 
         self.socket = self.ctx.socket(zmq.DEALER)
         self.socket.setsockopt(zmq.CONFLATE, 1)
@@ -692,7 +690,7 @@ class ClientCore:
                 self.latest_payload = payload
                 self.frames_received += 1
 
-                # Push directly to virtual camera pass-through WebSocket slot (LifoQueue maxsize=1)
+                # Push directly to the local preview WebSocket slot (LifoQueue maxsize=1)
                 dur = max(1e-3, recv_t - (self.start_time or recv_t))
                 b64_jpg = base64.b64encode(payload).decode("ascii")
                 ws_msg = json.dumps(
@@ -723,8 +721,9 @@ class ClientCore:
                 pass
 
     async def ws_broadcaster_worker(self) -> None:
-        """Pushes the latest swapped frame from Thread B's output slot to connected
-        virtual camera / Google Meet WebSocket clients with zero queue backlog.
+        """Push the latest processed frame to connected localhost preview clients.
+
+        The single-slot queue drops stale preview frames when a client cannot keep up.
         """
         while self.running:
             if not getattr(self, "_ws_clients", None):
@@ -800,44 +799,59 @@ class ClientCore:
         except Exception:
             pass
 
-    async def loopback_server_worker(self) -> None:
-        """Internal mock router server for loopback integration testing."""
-        self.loopback_ctx = zmq.asyncio.Context()
-        self.loopback_server_sock = self.loopback_ctx.socket(zmq.ROUTER)
-        self.loopback_server_sock.setsockopt(zmq.CONFLATE, 1)
-        self.loopback_server_sock.setsockopt(zmq.LINGER, 0)
+    def _loopback_server_thread_worker(self) -> None:
+        """Run the integration-test echo router in an OS-portable worker thread."""
+        ctx = zmq.Context()
+        sock = ctx.socket(zmq.ROUTER)
+        sock.setsockopt(zmq.CONFLATE, 1)
+        sock.setsockopt(zmq.LINGER, 0)
+        self.loopback_ctx = ctx
+        self.loopback_server_sock = sock
 
         bind_target = self.server_url
         try:
-            self.loopback_server_sock.bind(bind_target)
+            sock.bind(bind_target)
             logger.info(f"Loopback mock router bound to {bind_target}")
         except Exception as e:
             logger.warning(f"Could not bind loopback to {bind_target}: {e}")
             bind_target = "tcp://127.0.0.1:5588"
-            self.loopback_server_sock.bind(bind_target)
+            sock.bind(bind_target)
             self.server_url = bind_target
 
-        if hasattr(self, "loopback_ready"):
-            self.loopback_ready.set()
+        self.loopback_ready.set()
+        poller = zmq.Poller()
+        poller.register(sock, zmq.POLLIN)
 
-        while self.running:
+        try:
+            while self.running:
+                try:
+                    events = dict(poller.poll(50))
+                    if sock not in events:
+                        continue
+                    msg = sock.recv_multipart()
+                    if not msg:
+                        continue
+                    sender = msg[0]
+                    payload = msg[-1]
+                    if len(msg) >= 3:
+                        sock.send_multipart([sender, b"", payload])
+                    else:
+                        sock.send_multipart([sender, payload])
+                except Exception:
+                    if not self.running:
+                        break
+                    time.sleep(0.001)
+        finally:
             try:
-                msg = await asyncio.wait_for(
-                    self.loopback_server_sock.recv_multipart(), timeout=0.05
-                )
-                if not msg:
-                    continue
-                sender = msg[0]
-                payload = msg[-1]
-                if len(msg) >= 3:
-                    await self.loopback_server_sock.send_multipart([sender, b"", payload])
-                else:
-                    await self.loopback_server_sock.send_multipart([sender, payload])
-            except asyncio.TimeoutError:
-                continue
+                sock.close(linger=0)
             except Exception:
-                if not self.running:
-                    break
+                pass
+            try:
+                ctx.destroy(linger=0)
+            except Exception:
+                pass
+            self.loopback_server_sock = None
+            self.loopback_ctx = None
 
     async def _ws_handler(self, websocket: Any) -> None:
         self._ws_clients.add(websocket)
@@ -850,8 +864,9 @@ class ClientCore:
             self._ws_clients.discard(websocket)
 
     async def run(self) -> int:
-        """Coordinates Thread A (Capture), Thread B (Network Transporter), and WebSocket virtual
-        camera broadcaster, returning exit code 0 upon clean completion.
+        """Coordinate capture, transport, and the optional local preview broadcaster.
+
+        Returns exit code 0 after a clean bounded test or an intentional stop.
         """
         self.running = True
         self.start_time = time.perf_counter()
@@ -868,15 +883,18 @@ class ClientCore:
 
         tasks: List[asyncio.Task] = []
         if self.loopback:
-            self.loopback_ready = asyncio.Event()
-            self.loopback_task = asyncio.create_task(self.loopback_server_worker())
-            tasks.append(self.loopback_task)
-            await self.loopback_ready.wait()
-            self.init_socket()
+            self.loopback_ready = threading.Event()
+            self._loopback_thread = threading.Thread(
+                target=self._loopback_server_thread_worker,
+                name="LoopbackEchoRouter",
+                daemon=True,
+            )
+            self._loopback_thread.start()
+            ready = await asyncio.to_thread(self.loopback_ready.wait, 5.0)
+            if not ready:
+                self.running = False
+                raise RuntimeError("Loopback echo router did not start within five seconds")
             await asyncio.sleep(0.02)
-        else:
-            if self.socket is None or self.socket.closed:
-                self.init_socket()
 
         if self.cap is None:
             self.init_camera()
@@ -922,6 +940,8 @@ class ClientCore:
                 self._capture_thread.join(timeout=0.3)
             if self._transporter_thread is not None and self._transporter_thread.is_alive():
                 self._transporter_thread.join(timeout=0.3)
+            if self._loopback_thread is not None and self._loopback_thread.is_alive():
+                self._loopback_thread.join(timeout=1.0)
             if ws_server is not None:
                 try:
                     ws_server.close()
@@ -957,7 +977,7 @@ class ClientCore:
 
         if self.loopback_ctx is not None:
             try:
-                self.loopback_ctx.term()
+                self.loopback_ctx.destroy(linger=0)
             except Exception:
                 pass
             self.loopback_ctx = None
@@ -970,7 +990,7 @@ class ClientCore:
 
         if self.ctx is not None:
             try:
-                self.ctx.term()
+                self.ctx.destroy(linger=0)
             except Exception:
                 pass
 
