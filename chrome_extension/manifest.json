@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Processed Camera Research Demo",
+  "version": "1.0.0",
+  "description": "Local-only, visibly labelled preview for consent-based processed-video research.",
+  "host_permissions": [
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "ws://localhost/*",
+    "ws://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
+      "js": [
+        "preview.js"
+      ],
+      "css": [
+        "preview.css"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false,
+      "match_about_blank": false
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+# Local secrets and identity data
+.env
+.env.*
+!.env.example
+private/
+*.pem
+*.key
+*.p12
+*.pfx
+*.sqlite*
+*.db
+*.sql
+*.dump
+# Model weights and personal media are deliberately not redistributed
+*.onnx
+*.dfm
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.wav
+*.mp3
+*.jpg
+*.jpeg
+*.png
+*.npy
+*.npz
+*.zip
+*.tar
+*.gz
+# Runtime / tool state
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+node_modules/
+.DS_Store
+*.log
+benchmark-results*.json
+vendor/**/.assets/
+vendor/**/models/

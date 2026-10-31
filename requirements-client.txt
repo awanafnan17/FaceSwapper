@@ -1,0 +1,5 @@
+# Client-only transport and synthetic loopback. No AI model is required here.
+numpy>=2,<3
+opencv-python>=4.10,<5
+pyzmq>=26,<28
+websockets>=13,<16

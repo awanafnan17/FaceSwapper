@@ -1,0 +1,32 @@
+name: Source checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  transport:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: python -m pip install -r requirements-client.txt
+      - run: python -m py_compile single_image_model/client_core.py single_image_model/zmq_unified_server.py
+      - run: node --check chrome_extension/background.js
+      - run: node --check chrome_extension/preview.js
+      - run: node --test chrome_extension/test_extension.js
+      - run: python single_image_model/client_core.py --synthetic --loopback --headless --test-frames 10 --width 320 --height 240 --benchmark
