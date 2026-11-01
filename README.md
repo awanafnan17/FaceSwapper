@@ -2,13 +2,13 @@
 
 # Interview Face Swap
 
-### Single-image identity transfer · remote GPU inference · lightweight desktop transport
+### Consent-based single-image face transfer with remote GPU inference
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](#technology)
 [![ONNX Runtime](https://img.shields.io/badge/Inference-ONNX_Runtime-222222)](docs/MODELS.md)
 [![Status](https://img.shields.io/badge/Status-Research_%26_Development-f59e0b)](docs/VALIDATION.md)
 
-**A source-backed portfolio of real-time face processing, frame transport, tracking and compositing.**
+This research integration documents real-time face processing, frame transport, tracking, masking, and compositing.
 
 [Get started](docs/SETUP.md) · [Architecture](docs/ARCHITECTURE.md) · [Model details](docs/MODELS.md) · [Responsible use](docs/RESPONSIBLE_USE.md) · [Validation](docs/VALIDATION.md) · [Security](SECURITY.md)
 
@@ -20,7 +20,7 @@ The selected public workflow is **one consented source photograph → an Insight
 
 This is the **better fit for this public project** because it needs only one explicitly supplied image, keeps identity data easier to audit, and avoids a private training dataset or personalized model. It is not a claim that it universally wins every visual-quality comparison.
 
-> **Development status:** the client transport is tested with generated frames. The full CUDA/model pipeline requires compatible model weights and dependencies and has not been re-benchmarked for this public release. Use this as a documented research integration, not a production-ready interview or identity-verification tool.
+> **Development status:** the client transport is tested with generated frames. The full CUDA/model pipeline requires compatible model weights and dependencies and has not been re-benchmarked for this public release. This research integration is not ready for use in interviews or identity verification.
 
 ## What the project does
 
@@ -38,7 +38,7 @@ The historical project name refers to its original interview-system prototype. P
 
 The public snapshot intentionally removes the archived device spoofing, function cloaking, third-party-site injection, personalized identity model and automatic reference-photo discovery. The browser component only renders a labelled preview on localhost and never replaces a camera. See [Responsible use](docs/RESPONSIBLE_USE.md).
 
-## Try the transport in two minutes
+## Test the transport locally
 
 Python 3.10+ and the client dependencies are sufficient. Python 3.12 was used for the public smoke test.
 
