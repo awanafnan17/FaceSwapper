@@ -1,6 +1,6 @@
 <div align="center">
 
-# Interview Face Swap
+# FaceSwapper
 
 ### Consent-based single-image face transfer with remote GPU inference
 
@@ -43,8 +43,8 @@ The public snapshot intentionally removes the archived device spoofing, function
 Python 3.10+ and the client dependencies are sufficient. Python 3.12 was used for the public smoke test.
 
 ```bash
-git clone https://github.com/awanafnan17/interview-face-swap.git
-cd interview-face-swap
+git clone https://github.com/awanafnan17/FaceSwapper.git
+cd FaceSwapper
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements-client.txt
